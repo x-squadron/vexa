@@ -1,4 +1,4 @@
-.PHONY: all setup submodules env force-env download-model build-bot-image build up down ps logs test migrate makemigrations init-db stamp-db migrate-or-init
+.PHONY: all setup submodules env force-env download-model build-bot-image build up down ps logs test test-bot-manager test-services replay-end-of-meeting migrate makemigrations init-db stamp-db migrate-or-init
 
 # Default target: Sets up everything and starts the services
 all: setup-env build-bot-image build up migrate-or-init
@@ -53,7 +53,7 @@ endif
 			echo "ADMIN_API_TOKEN=token" > env-example.cpu; \
 			echo "LANGUAGE_DETECTION_SEGMENTS=10" >> env-example.cpu; \
 			echo "VAD_FILTER_THRESHOLD=0.5" >> env-example.cpu; \
-			echo "WHISPER_MODEL_SIZE=tiny" >> env-example.cpu; \
+			echo "WHISPER_MODEL_SIZE=medium" >> env-example.cpu; \
 			echo "DEVICE_TYPE=cpu" >> env-example.cpu; \
 			echo "BOT_IMAGE_NAME=vexa-bot:dev" >> env-example.cpu; \
 			echo "# Exposed Host Ports" >> env-example.cpu; \
@@ -103,7 +103,7 @@ endif
 			echo "ADMIN_API_TOKEN=token" > env-example.cpu; \
 			echo "LANGUAGE_DETECTION_SEGMENTS=10" >> env-example.cpu; \
 			echo "VAD_FILTER_THRESHOLD=0.5" >> env-example.cpu; \
-			echo "WHISPER_MODEL_SIZE=tiny" >> env-example.cpu; \
+			echo "WHISPER_MODEL_SIZE=medium" >> env-example.cpu; \
 			echo "DEVICE_TYPE=cpu" >> env-example.cpu; \
 			echo "BOT_IMAGE_NAME=vexa-bot:dev" >> env-example.cpu; \
 			echo "# Exposed Host Ports" >> env-example.cpu; \
@@ -225,6 +225,44 @@ test: check_docker
 	@chmod +x run_vexa_interaction.sh
 	@./run_vexa_interaction.sh
 
+# Run unit tests for individual services
+test-bot-manager:
+	@echo "---> Running bot-manager tests... $(pytest-args)"
+	@cd services/bot-manager && python -m pytest tests/ $(pytest-args)
+
+test-bot-manager-verbose: pytest-args:="-p no:sugar"
+# Run unit tests for individual services
+test-bot-manager-verbose: test-bot-manager 
+	@echo "---> Done running $@ $(pytest-args)..."
+
+# Run all service tests
+test-services: test-bot-manager
+	@echo "---> All service tests completed."
+
+# Replay end-of-meeting scenarios for debugging and testing
+replay-end-of-meeting: DEBUG?="httpx,e2e.tests*"
+replay-end-of-meeting:
+ifndef SESSION_ID
+	@echo "ERROR: SESSION_ID is required. Usage: make replay-end-of-meeting SESSION_ID=session-abc123 [DRY_RUN=true]"
+	@exit 1
+else ifndef DB_HOST
+	@echo "ERROR: DB_HOST env variable is required."
+	@exit 1
+else ifndef DB_NAME
+	@echo "ERROR: DB_NAME env variable is required."
+	@exit 1
+# else ifndef DB_PASSWORD
+# 	@echo "ERROR: DB_PASSWORD env variable is required."
+# 	@exit 1
+endif
+	@echo "---> Replaying end-of-meeting scenario for session: $(SESSION_ID)"
+	@if [ "$(DRY_RUN)" = "true" ]; then \
+		echo "---> DRY RUN MODE: Mocking webhooks and displaying payload"; \
+	else \
+		echo "---> LIVE MODE: Using real webhook delivery"; \
+	fi
+	@cd services/bot-manager && DRY_RUN=$(DRY_RUN) DEBUG=$(DEBUG) LOG_LEVEL=DEBUG pytest -m e2e tests/e2e/test_end_of_meeting.py::TestEndOfMeeting::test_end_of_meeting_by_session_id -s --disable-warnings --log-http
+
 # --- Database Migration Commands ---
 
 # Smart migration: detects if database is fresh, legacy, or already Alembic-managed.
@@ -232,13 +270,13 @@ test: check_docker
 migrate-or-init: check_docker
 	@echo "---> Starting smart database migration/initialization..."; \
 	set -e; \
-	if ! docker-compose ps -q postgres | grep -q .; then \
+	if ! docker compose ps -q postgres | grep -q .; then \
 		echo "ERROR: PostgreSQL container is not running. Please run 'make up' first."; \
 		exit 1; \
 	fi; \
 	echo "---> Waiting for database to be ready..."; \
 	count=0; \
-	while ! docker-compose exec -T postgres pg_isready -U postgres -d vexa -q; do \
+	while ! docker compose exec -T postgres pg_isready -U postgres -d vexa -q; do \
 		if [ $$count -ge 12 ]; then \
 			echo "ERROR: Database did not become ready in 60 seconds."; \
 			exit 1; \
@@ -248,32 +286,32 @@ migrate-or-init: check_docker
 		count=$$((count+1)); \
 	done; \
 	echo "---> Database is ready. Checking its state..."; \
-	if docker-compose exec -T postgres psql -U postgres -d vexa -t -c "SELECT 1 FROM information_schema.tables WHERE table_name = 'alembic_version';" | grep -q 1; then \
+	if docker compose exec -T postgres psql -U postgres -d vexa -t -c "SELECT 1 FROM information_schema.tables WHERE table_name = 'alembic_version';" | grep -q 1; then \
 		echo "STATE: Alembic-managed database detected."; \
 		echo "ACTION: Running standard migrations to catch up to 'head'..."; \
 		$(MAKE) migrate; \
-	elif docker-compose exec -T postgres psql -U postgres -d vexa -t -c "SELECT 1 FROM information_schema.tables WHERE table_name = 'meetings';" | grep -q 1; then \
+	elif docker compose exec -T postgres psql -U postgres -d vexa -t -c "SELECT 1 FROM information_schema.tables WHERE table_name = 'meetings';" | grep -q 1; then \
 		echo "STATE: Legacy (non-Alembic) database detected."; \
 		echo "ACTION: Stamping at 'base' and migrating to 'head' to bring it under Alembic control..."; \
-		docker-compose exec -T transcription-collector alembic -c /app/alembic.ini stamp base; \
+		docker compose exec -T transcription-collector alembic -c /app/alembic.ini stamp base; \
 		$(MAKE) migrate; \
 	else \
 		echo "STATE: Fresh, empty database detected."; \
 		echo "ACTION: Creating schema directly from models and stamping at revision dc59a1c03d1f..."; \
-		docker-compose exec -T transcription-collector python -c "import asyncio; from shared_models.database import init_db; asyncio.run(init_db())"; \
-		docker-compose exec -T transcription-collector alembic -c /app/alembic.ini stamp dc59a1c03d1f; \
+		docker compose exec -T transcription-collector python -c "import asyncio; from shared_models.database import init_db; asyncio.run(init_db())"; \
+		docker compose exec -T transcription-collector alembic -c /app/alembic.ini stamp dc59a1c03d1f; \
 	fi; \
 	echo "---> Smart database migration/initialization complete!"
 
 # Apply all pending migrations to bring database to latest version
 migrate: check_docker
 	@echo "---> Applying database migrations..."
-	@if ! docker-compose ps postgres | grep -q "Up"; then \
+	@if ! docker compose ps postgres | grep -q "Up"; then \
 		echo "ERROR: PostgreSQL container is not running. Please run 'make up' first."; \
 		exit 1; \
 	fi
 	@echo "---> Running alembic upgrade head..."
-	@docker-compose exec -T transcription-collector alembic -c /app/alembic.ini upgrade head
+	@docker compose exec -T transcription-collector alembic -c /app/alembic.ini upgrade head
 
 # Create a new migration file based on model changes
 makemigrations: check_docker
@@ -283,39 +321,39 @@ makemigrations: check_docker
 		exit 1; \
 	fi
 	@echo "---> Creating new migration: $(M)"
-	@if ! docker-compose ps postgres | grep -q "Up"; then \
+	@if ! docker compose ps postgres | grep -q "Up"; then \
 		echo "ERROR: PostgreSQL container is not running. Please run 'make up' first."; \
 		exit 1; \
 	fi
-	@docker-compose exec -T transcription-collector alembic -c /app/alembic.ini revision --autogenerate -m "$(M)"
+	@docker compose exec -T transcription-collector alembic -c /app/alembic.ini revision --autogenerate -m "$(M)"
 
 # Initialize the database (first time setup) - creates tables and stamps with latest revision
 init-db: check_docker
 	@echo "---> Initializing database and stamping with Alembic..."
-	docker-compose run --rm transcription-collector python -c "import asyncio; from shared_models.database import init_db; asyncio.run(init_db())"
-	docker-compose run --rm transcription-collector alembic -c /app/alembic.ini stamp head
+	docker compose run --rm transcription-collector python -c "import asyncio; from shared_models.database import init_db; asyncio.run(init_db())"
+	docker compose run --rm transcription-collector alembic -c /app/alembic.ini stamp head
 	@echo "---> Database initialized and stamped."
 
 # Stamp existing database with current version (for existing installations)
 stamp-db: check_docker
 	@echo "---> Stamping existing database with current migration version..."
-	@if ! docker-compose ps postgres | grep -q "Up"; then \
+	@if ! docker compose ps postgres | grep -q "Up"; then \
 		echo "ERROR: PostgreSQL container is not running. Please run 'make up' first."; \
 		exit 1; \
 	fi
-	@docker-compose exec -T transcription-collector alembic -c /app/alembic.ini stamp head
+	@docker compose exec -T transcription-collector alembic -c /app/alembic.ini stamp head
 	@echo "---> Database stamped successfully!"
 
 # Show current migration status
 migration-status: check_docker
 	@echo "---> Checking migration status..."
-	@if ! docker-compose ps postgres | grep -q "Up"; then \
+	@if ! docker compose ps postgres | grep -q "Up"; then \
 		echo "ERROR: PostgreSQL container is not running. Please run 'make up' first."; \
 		exit 1; \
 	fi
 	@echo "---> Current database version:"
-	@docker-compose exec -T transcription-collector alembic -c /app/alembic.ini current
+	@docker compose exec -T transcription-collector alembic -c /app/alembic.ini current
 	@echo "---> Migration history:"
-	@docker-compose exec -T transcription-collector alembic -c /app/alembic.ini history --verbose
+	@docker compose exec -T transcription-collector alembic -c /app/alembic.ini history --verbose
 
 # --- End Database Migration Commands ---
