@@ -117,7 +117,8 @@ const prepareForRecording = async (page: Page): Promise<void> => {
 
 const joinMeeting = async (page: Page, meetingUrl: string, botName: string) => {
   const enterNameField = 'input[type="text"][aria-label="Your name"]';
-  const joinButton = '//button[.//span[text()="Ask to join"]]';
+  const joinButton =
+    '//button[.//span[text()="Ask to join" or text()="Join now"]]';
   const muteButton = '[aria-label*="Turn off microphone"]';
   const cameraOffButton = '[aria-label*="Turn off camera"]';
 
