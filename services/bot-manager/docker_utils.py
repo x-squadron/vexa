@@ -8,6 +8,7 @@ import time
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 import asyncio
+from app.adapters.logging.standard_logger import StandardLogger
 
 # Explicitly import the exceptions from requests
 from requests.exceptions import RequestException, ConnectionError, HTTPError
@@ -32,6 +33,8 @@ DOCKER_HOST = os.environ.get("DOCKER_HOST", "unix://var/run/docker.sock")
 DOCKER_NETWORK = os.environ.get("DOCKER_NETWORK", "vexa_default")
 BOT_IMAGE_NAME = os.environ.get("BOT_IMAGE_NAME", "vexa-bot:dev")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
+RECORDING_VOLUME_PATH = os.environ.get("RECORDING_VOLUME_PATH")
+RECORDING_BIND_SOURCE = os.environ.get("RECORDING_BIND_SOURCE")
 
 DEVICE_TYPE = os.environ.get("DEVICE_TYPE", "cuda").lower()
 
@@ -286,14 +289,19 @@ async def start_bot_container(
     socket_url_base = f'http+unix://{socket_path_encoded}'
 
     # Docker API payload for creating a container
-    create_payload = {
+    container_config = {
         "Image": BOT_IMAGE_NAME,
         "Env": environment,
-        "Labels": {"vexa.user_id": str(user_id)}, # *** ADDED Label ***
         "HostConfig": {
+            "Binds": [f"{RECORDING_BIND_SOURCE}:{RECORDING_VOLUME_PATH}"],
             "NetworkMode": DOCKER_NETWORK,
-            "AutoRemove": True
+            "ShmSize": 2 * 1024 * 1024 * 1024,  # 2GB
+            # "AutoRemove": True
         },
+        "Labels": {
+            "vexa.user_id": str(user_id),
+            "vexa.bot_name": bot_name
+        }
     }
 
     create_url = f'{socket_url_base}/containers/create?name={container_name}'
@@ -302,7 +310,10 @@ async def start_bot_container(
     container_id = None # Initialize container_id
     try:
         logger.info(f"Attempting to create bot container '{container_name}' ({BOT_IMAGE_NAME}) via socket ({socket_url_base})...")
-        response = session.post(create_url, json=create_payload)
+        logger.debug(f"Container config: {container_config}")
+        response = session.post(create_url, json=container_config)
+        if response.status_code != 201:
+            logger.error(f"Container creation failed. Status: {response.status_code}, Response: {response.text}")
         response.raise_for_status()
         container_info = response.json()
         container_id = container_info.get('Id')
