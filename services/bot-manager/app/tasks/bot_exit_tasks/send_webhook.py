@@ -47,10 +47,10 @@ async def run(
 
         data = meeting.data or {}
 
-        # Prepare the webhook payload
+        # Prepare the webhook payload (plan: audio_object_key when MinIO used; organization_id/user_id echoed when stored at send bot)
         payload = {
             'id': meeting.id,
-            'user_id': meeting.user_id,
+            'user_id': data.get('user_id') if data.get('user_id') is not None else meeting.user_id,
             'platform': meeting.platform,
             'native_meeting_id': meeting.native_meeting_id,
             'constructed_meeting_url': meeting.constructed_meeting_url,
@@ -61,9 +61,17 @@ async def run(
             'end_time': meeting.end_time.isoformat() if meeting.end_time else None,
             'data': data,
             'created_at': meeting.created_at.isoformat() if meeting.created_at else None,
-            # 'updated_at': meeting.updated_at.isoformat() if meeting.updated_at else None,
             'participants': data.get('participants', []),
         }
+        payload['user_id_vexa'] = meeting.user_id
+        if data.get('audio_object_key') is not None:
+            payload['audio_object_key'] = data['audio_object_key']
+        if data.get('video_object_key') is not None:
+            payload['video_object_key'] = data['video_object_key']
+        if data.get('organization_id') is not None:
+            payload['organization_id'] = data['organization_id']
+        if data.get('user_id') is not None:
+            payload['user_id'] = data['user_id']
 
         # Send the webhook
         async with httpx.AsyncClient() as client:

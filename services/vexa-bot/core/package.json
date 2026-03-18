@@ -15,6 +15,7 @@
   "license": "ISC",
   "dependencies": {
     "@types/uuid": "^10.0.0",
+    "minio": "^8.0.7",
     "playwright": "^1.51.1",
     "playwright-extra": "^4.3.6",
     "puppeteer": "^24.4.0",

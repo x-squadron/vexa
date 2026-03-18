@@ -59,7 +59,7 @@ export async function handleGoogleMeet(
       }),
 
       // Prepare for recording (expose functions, etc.) while waiting for admission
-      prepareForRecording(page),
+      prepareForRecording(page)
     ]);
 
     if (!isAdmitted) {
@@ -73,7 +73,7 @@ export async function handleGoogleMeet(
     }
 
     log("Successfully admitted to the meeting, starting recording");
-    // Pass platform from botConfig to startRecording
+    // Pass platform from botConfig to startRecording (its page.evaluate may never resolve due to observers/intervals)
     await startRecording(page, botConfig, botCallbacks);
   } catch (error: any) {
     console.error(
@@ -212,7 +212,7 @@ const startRecording = async (
         platform,
         nativeMeetingId,
         language: initialLanguage,
-        task: initialTask,
+        task: initialTask
       } = botConfigData; // Use the nested botConfigData
 
       // --- ADD Helper function to generate UUID in browser context ---
@@ -338,7 +338,7 @@ const startRecording = async (
               // --- NEW: Start MediaRecorder to save audio using the COMBINED stream ---
               try {
                 const audioRecorder = new MediaRecorder(stream, {
-                  mimeType: "audio/webm",
+                  mimeType: "audio/webm"
                 });
 
                 audioRecorder.ondataavailable = async (event: BlobEvent) => {
@@ -370,16 +370,7 @@ const startRecording = async (
                       "[AudioRecord] MediaRecorder for audio saving has stopped."
                     );
                   }
-
-                  try {
-                    await botCallbacks?.onMeetingEnd(originalConnectionId);
-                  } catch (error) {
-                    (window as any).logBot(
-                      `triggerNodeGracefulLeave error: ${error}`
-                    );
-                  } finally {
-                    originalLeave();
-                  }
+                  originalLeave();
                 };
               } catch (err: any) {
                 (window as any).logBot(
@@ -478,7 +469,7 @@ const startRecording = async (
                         platform: platform, // From config
                         token: token, // From config
                         meeting_id: nativeMeetingId, // From config
-                        meeting_url: meetingUrl || null, // From config, default to null
+                        meeting_url: meetingUrl || null // From config, default to null
                       };
 
                       const jsonPayload = JSON.stringify(initialConfigPayload);
@@ -689,7 +680,7 @@ const startRecording = async (
               const silenceClass = "gjg47c"; // Class indicating the participant is silent
               const nameSelectors = [
                 // Try these selectors to find participant's name
-                "[data-participant-id]", // Attribute for participant ID
+                "[data-participant-id]" // Attribute for participant ID
               ];
 
               // State for tracking speaking status
@@ -746,7 +737,7 @@ const startRecording = async (
                         "devices",
                         "speaker",
                         "speakers",
-                        "microphone",
+                        "microphone"
                       ];
                       if (
                         !forbiddenSubstrings.some((sub) =>
@@ -762,7 +753,7 @@ const startRecording = async (
                     ".zWGUib",
                     ".cS7aqe.N2K3jd",
                     ".XWGOtd",
-                    '[data-tooltip*="name"]',
+                    '[data-tooltip*="name"]'
                   ];
                   for (const selector of googleTsNameSelectors) {
                     const nameElement = mainTile.querySelector(
@@ -794,7 +785,7 @@ const startRecording = async (
                             "devices",
                             "speaker",
                             "speakers",
-                            "microphone",
+                            "microphone"
                           ];
                           if (
                             !forbiddenSubstrings.some((sub) =>
@@ -835,7 +826,7 @@ const startRecording = async (
                         "devices",
                         "speaker",
                         "speakers",
-                        "microphone",
+                        "microphone"
                       ];
                       if (
                         !forbiddenSubstrings.some((sub) =>
@@ -905,8 +896,8 @@ const startRecording = async (
                       token: token,
                       platform: platform,
                       meeting_id: nativeMeetingId,
-                      meeting_url: meetingUrl,
-                    },
+                      meeting_url: meetingUrl
+                    }
                   };
 
                   try {
@@ -993,7 +984,7 @@ const startRecording = async (
                 // NEW: Add participant to our central map
                 activeParticipants.set(participantId, {
                   name: getParticipantName(participantElement),
-                  element: participantElement,
+                  element: participantElement
                 });
 
                 const callback = function (
@@ -1026,7 +1017,7 @@ const startRecording = async (
                 observer.observe(participantElement, {
                   attributes: true,
                   attributeFilter: ["class"],
-                  subtree: true,
+                  subtree: true
                 });
 
                 if (!(participantElement as any).dataset.vexaObserverAttached) {
@@ -1107,7 +1098,7 @@ const startRecording = async (
 
               bodyObserver.observe(document.body, {
                 childList: true,
-                subtree: true,
+                subtree: true
               });
 
               // --- ADD: Enhanced Leave Function with Session End Signal ---
@@ -1127,8 +1118,8 @@ const startRecording = async (
                         client_timestamp_ms: Date.now(),
                         token: token,
                         platform: platform,
-                        meeting_id: nativeMeetingId,
-                      },
+                        meeting_id: nativeMeetingId
+                      }
                     };
 
                     socket.send(JSON.stringify(sessionControlMessage));
@@ -1295,7 +1286,7 @@ const startRecording = async (
                 'button[data-tooltip*="people"]',
                 'button[data-tooltip*="People"]',
                 'button[data-tooltip*="participants"]',
-                'button[data-tooltip*="Participants"]',
+                'button[data-tooltip*="Participants"]'
               ];
 
               let peopleButton: HTMLElement | null = null;
@@ -1368,10 +1359,16 @@ const startRecording = async (
                   }
                 }
 
-                // FIXED: Correct logic for tracking alone time
-                if (count <= 1) {
-                  // Bot is 1, so count <= 1 means bot is alone
+                // FIXED: Only treat as "alone" when we have a reliable participant list (People panel was opened).
+                // When People button was not found, we only see the main-stage tiles; count may be 1 (just the bot) even with others in the call.
+                const peoplePanelOpened =
+                  (window as any).peopleButtonClicked === true;
+                if (peoplePanelOpened && count <= 1) {
+                  // Bot is 1, so count <= 1 means bot is alone (and we have the full list from People panel)
                   aloneTime += 5; // It's a 5-second interval
+                } else if (!peoplePanelOpened && count <= 1) {
+                  // Fallback mode: we may only see the bot in the main view; do not treat as alone
+                  aloneTime = 0;
                 } else {
                   // Someone else is here, so reset the timer.
                   if (aloneTime > 0) {

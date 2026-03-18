@@ -344,17 +344,18 @@ class TestSendWebhookIntegration:
         
         # Verify payload structure and types
         required_fields = [
-            'id', 'user_id', 'platform', 'native_meeting_id', 'constructed_meeting_url',
+            'id', 'user_id', 'user_id_vexa', 'platform', 'native_meeting_id', 'constructed_meeting_url',
             'status', 'bot_container_id', 'connection_id', 'start_time', 'end_time',
-            'data', 'created_at', 'updated_at', 'participants'
+            'data', 'created_at', 'participants'
         ]
         
         for field in required_fields:
             assert field in payload, f"Required field '{field}' missing from webhook payload"
         
-        # Verify specific types and values
+        # Verify specific types and values (user_id may be int (Vexa) or str (Faktions UUID when stored))
         assert isinstance(payload['id'], int)
-        assert isinstance(payload['user_id'], int)
+        assert payload['user_id'] is not None
+        assert isinstance(payload['user_id_vexa'], int)
         assert isinstance(payload['platform'], str)
         assert isinstance(payload['participants'], list)
         assert payload['platform'] == "google_meet"

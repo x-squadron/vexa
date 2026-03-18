@@ -142,7 +142,9 @@ async def start_bot_container(
     user_token: str,
     native_meeting_id: str,
     language: Optional[str],
-    task: Optional[str]
+    task: Optional[str],
+    organization_id: Optional[str] = None,
+    user_id_faktions: Optional[str] = None,
 ) -> Optional[tuple[str, str]]:
     """
     Starts a vexa-bot container via requests_unixsocket AFTER checking user limit.
@@ -258,6 +260,10 @@ async def start_bot_container(
         },
         "botManagerCallbackUrl": f"http://bot-manager:8080/bots/internal/callback/exited"
     }
+    if organization_id is not None:
+        bot_config_data["organization_id"] = organization_id
+    if user_id_faktions is not None:
+        bot_config_data["user_id"] = user_id_faktions
     # Remove keys with None values before serializing
     cleaned_config_data = {k: v for k, v in bot_config_data.items() if v is not None}
     bot_config_json = json.dumps(cleaned_config_data)
@@ -275,12 +281,25 @@ async def start_bot_container(
 
     logger.info(f"Passing WHISPER_LIVE_URL to bot: {whisper_live_url_for_bot}")
 
-    # These are the environment variables passed to the Node.js process  of the vexa-bot started by your entrypoint.sh.
+    # These are the environment variables passed to the Node.js process of the vexa-bot started by your entrypoint.sh.
     environment = [
         f"BOT_CONFIG={bot_config_json}",
         f"WHISPER_LIVE_URL={whisper_live_url_for_bot}", # Use the URL from bot-manager's env
         f"LOG_LEVEL={os.getenv('LOG_LEVEL', 'INFO').upper()}",
     ]
+    # Binds: recordings volume + optional host path for participant debug log
+    binds = [f"{RECORDING_BIND_SOURCE}:{RECORDING_VOLUME_PATH}"] if (RECORDING_BIND_SOURCE and RECORDING_VOLUME_PATH) else []
+    participant_debug_host = os.getenv("PARTICIPANT_DEBUG_LOG_HOST_PATH")
+    if participant_debug_host:
+        container_debug_path = "/app/vexa_debug_out"
+        environment.append(f"PARTICIPANT_DEBUG_LOG_PATH={container_debug_path}/participant_debug_logs.txt")
+        binds.append(f"{participant_debug_host}:{container_debug_path}")
+    elif RECORDING_VOLUME_PATH:
+        environment.append(f"PARTICIPANT_DEBUG_LOG_PATH={RECORDING_VOLUME_PATH.rstrip('/')}/participant_debug_logs.txt")
+    for env_name in ("APP_MINIO_ENDPOINT", "APP_MINIO_BUCKET", "APP_MINIO_ACCESS_KEY", "APP_MINIO_SECRET_KEY"):
+        env_val = os.getenv(env_name)
+        if env_val:
+            environment.append(f"{env_name}={env_val}")
 
     # Ensure absolute path for URL encoding here as well
     socket_path_relative = DOCKER_HOST.split('//', 1)[1]
@@ -293,7 +312,7 @@ async def start_bot_container(
         "Image": BOT_IMAGE_NAME,
         "Env": environment,
         "HostConfig": {
-            "Binds": [f"{RECORDING_BIND_SOURCE}:{RECORDING_VOLUME_PATH}"],
+            "Binds": binds,
             "NetworkMode": DOCKER_NETWORK,
             "ShmSize": 2 * 1024 * 1024 * 1024,  # 2GB
             # "AutoRemove": True

@@ -4,6 +4,8 @@ VAD_FILTER_THRESHOLD=0.2
 WHISPER_MODEL_SIZE=medium
 DEVICE_TYPE=cpu
 BOT_IMAGE_NAME=vexa-bot:dev
+# Optional: seconds to wait for Docker daemon during build (default 300 if unset in Makefile)
+# COMPOSE_HTTP_TIMEOUT=300
 # Exposed Host Ports
 API_GATEWAY_HOST_PORT=18056
 ADMIN_API_HOST_PORT=18057

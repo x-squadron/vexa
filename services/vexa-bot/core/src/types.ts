@@ -15,5 +15,7 @@ export type BotConfig = {
   },
   reconnectionIntervalMs?: number,
   meeting_id?: number,
-  botManagerCallbackUrl?: string;
+  botManagerCallbackUrl?: string,
+  organization_id?: string | null,
+  user_id?: string | null,
 }

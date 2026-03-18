@@ -69,6 +69,8 @@ class BotExitCallbackPayload(BaseModel):
     connection_id: str = Field(..., description="The connectionId (session_uid) of the exiting bot.")
     exit_code: int = Field(..., description="The exit code of the bot process (0 for success, 1 for UI leave failure).")
     reason: Optional[str] = Field("self_initiated_leave", description="Reason for the exit.")
+    audio_object_key: Optional[str] = Field(None, description="MinIO object key of the uploaded recording (when bot streams audio to MinIO).")
+    video_object_key: Optional[str] = Field(None, description="MinIO object key of the uploaded video recording when available.")
 # --- --------------------------------------------- ---
 
 @app.on_event("startup")
@@ -250,6 +252,16 @@ async def request_bot(
         await db.refresh(new_meeting)
         meeting_id_for_bot = new_meeting.id # Use this for the bot
         logger.info(f"Created new meeting record with ID: {meeting_id_for_bot}")
+        # Store optional organization_id and user_id (Faktions UUIDs) in meeting.data for webhook echo-back
+        if getattr(req, 'organization_id', None) or getattr(req, 'user_id', None):
+            data = dict(new_meeting.data) if new_meeting.data else {}
+            if getattr(req, 'organization_id', None):
+                data['organization_id'] = req.organization_id
+            if getattr(req, 'user_id', None):
+                data['user_id'] = req.user_id
+            new_meeting.data = data
+            await db.commit()
+            await db.refresh(new_meeting)
     else: # This case should ideally not be reached if the 409 was raised correctly above.
           # This implies existing_meeting was found and its container was running.
         logger.error(f"Logic error: Should have raised 409 for existing meeting {existing_meeting.id}, but proceeding.")
@@ -291,6 +303,7 @@ async def request_bot(
     connection_id = None
     try:
         logger.info(f"Attempting to start bot container for meeting {meeting_id} (native: {native_meeting_id})...")
+        meeting_data = current_meeting_for_bot_launch.data or {}
         container_id, connection_id = await start_bot_container(
             user_id=current_user.id,
             meeting_id=meeting_id, # Internal DB ID
@@ -300,7 +313,9 @@ async def request_bot(
             user_token=user_token,
             native_meeting_id=native_meeting_id,
             language=req.language,
-            task=req.task
+            task=req.task,
+            organization_id=meeting_data.get('organization_id'),
+            user_id_faktions=meeting_data.get('user_id'),
         )
         logger.info(f"Call to start_bot_container completed. Container ID: {container_id}, Connection ID: {connection_id}")
 
@@ -662,6 +677,15 @@ async def bot_exit_callback(
             logger.warning(f"Bot exit callback: Meeting {meeting_id} status updated to 'failed' due to exit_code {exit_code}.")
         
         meeting.end_time = datetime.utcnow()
+        # Store audio_object_key in meeting.data for webhook payload when provided by bot
+        if getattr(payload, 'audio_object_key', None):
+            data = dict(meeting.data) if meeting.data else {}
+            data['audio_object_key'] = payload.audio_object_key
+            meeting.data = data
+        if getattr(payload, 'video_object_key', None):
+            data = dict(meeting.data) if meeting.data else {}
+            data['video_object_key'] = payload.video_object_key
+            meeting.data = data
         await db.commit()
         await db.refresh(meeting)
         logger.info(f"Bot exit callback: Meeting {meeting.id} successfully updated in DB.")

@@ -10,6 +10,7 @@ import * as http from "http"; // ADDED: For HTTP callback
 import * as https from "https"; // ADDED: For HTTPS callback (if needed)
 import * as fs from "fs"; // ADDED: For file stream operations
 import { VexaBotCallbacks } from "./adapters/gateways/VexaBotCallbacks";
+import * as minioUploader from "./minioUploader";
 
 // Module-level variables to store current configuration
 let currentLanguage: string | null | undefined = null;
@@ -19,6 +20,8 @@ let currentConnectionId: string | null = null;
 let botManagerCallbackUrl: string | null = null; // ADDED: To store callback URL
 let currentPlatform: "google_meet" | "zoom" | "teams" | undefined;
 let page: Page | null = null; // Initialize page, will be set in runBot
+let activeBotCallbacks: VexaBotCallbacks | null = null;
+let meetingEndTasksDone = false;
 
 // --- ADDED: Flag to prevent multiple shutdowns ---
 let isShuttingDown = false;
@@ -170,12 +173,53 @@ async function performGracefulLeave(
     reason !== "self_initiated_leave" ? exitCode : platformLeaveSuccess ? 0 : 1;
   const finalCallbackReason = reason;
 
+  if (!meetingEndTasksDone && currentConnectionId && activeBotCallbacks) {
+    try {
+      await activeBotCallbacks.onMeetingEnd(currentConnectionId);
+    } catch (meetingEndError: any) {
+      log(
+        `[Graceful Leave] onMeetingEnd failed: ${meetingEndError?.message || meetingEndError}`
+      );
+    } finally {
+      meetingEndTasksDone = true;
+    }
+  }
+
   if (botManagerCallbackUrl && currentConnectionId) {
-    const payload = JSON.stringify({
+    if (page && !page.isClosed() && minioUploader.getMinioUploadInitialized()) {
+      try {
+        await page.close();
+        await new Promise((r) => setTimeout(r, 500));
+      } catch (_) {}
+    }
+    let audioObjectKey: string | null = null;
+    const finalizedPromise = minioUploader.getFinalizedPromise();
+    if (finalizedPromise) {
+      try {
+        audioObjectKey = await Promise.race([
+          finalizedPromise,
+          new Promise<string | null>((resolve) =>
+            setTimeout(() => resolve(null), 120000)
+          )
+        ]);
+      } catch (_) {
+        audioObjectKey = null;
+      }
+    }
+
+    const payloadObj: Record<string, unknown> = {
       connection_id: currentConnectionId,
       exit_code: finalCallbackExitCode,
       reason: finalCallbackReason,
-    });
+    };
+    if (audioObjectKey) {
+      payloadObj.audio_object_key = audioObjectKey;
+    }
+    const videoObjectKey = minioUploader.getVideoObjectKey();
+    if (videoObjectKey) {
+      payloadObj.video_object_key = videoObjectKey;
+    }
+    const payload = JSON.stringify(payloadObj);
 
     try {
       log(
@@ -286,6 +330,8 @@ export async function runBot(botConfig: BotConfig): Promise<void> {
   currentConnectionId = botConfig.connectionId;
   botManagerCallbackUrl = botConfig.botManagerCallbackUrl || null; // ADDED: Get callback URL from botConfig
   currentPlatform = botConfig.platform; // Set currentPlatform here
+  activeBotCallbacks = new VexaBotCallbacks();
+  meetingEndTasksDone = false;
 
   // Destructure other needed config values
   const { meetingUrl, platform, botName } = botConfig;
@@ -363,26 +409,48 @@ export async function runBot(botConfig: BotConfig): Promise<void> {
     },
   });
 
-  // --- NEW: Audio Recording Setup ---
-  const audioFilePath = `/app/recordings/audio_${botConfig.connectionId}.webm`;
-  const audioWriteStream = fs.createWriteStream(audioFilePath);
-  log(`[AudioRecord] Audio will be saved to: ${audioFilePath}`);
+  // --- Audio Recording: MinIO (multipart) or local file ---
+  const useMinio = minioUploader.isMinioConfigured();
+  let audioWriteStream: fs.WriteStream | null = null;
+  if (useMinio) {
+    const ok = await minioUploader.initMinioUpload(
+      botConfig.organization_id ?? undefined,
+      botConfig.nativeMeetingId ?? botConfig.meeting_id ?? undefined,
+      botConfig.connectionId,
+    );
+    if (ok) {
+      log(`[AudioRecord] Audio will be streamed to MinIO (multipart).`);
+    } else {
+      log(`[AudioRecord] MinIO init failed; falling back to local file.`);
+      audioWriteStream = fs.createWriteStream(
+        `/app/recordings/audio_${botConfig.connectionId}.webm`,
+      );
+    }
+  } else {
+    const audioFilePath = `/app/recordings/audio_${botConfig.connectionId}.webm`;
+    audioWriteStream = fs.createWriteStream(audioFilePath);
+    log(`[AudioRecord] Audio will be saved to: ${audioFilePath}`);
+  }
 
-  await context.exposeFunction("onAudioChunk", (chunk: string) => {
-    // We receive the chunk as a base64 string, convert it back to a buffer
+  await context.exposeFunction("onAudioChunk", async (chunk: string) => {
     const buffer = Buffer.from(chunk, "base64");
-    audioWriteStream.write(buffer);
+    if (minioUploader.getMinioUploadInitialized()) {
+      await minioUploader.minioOnChunk(buffer);
+    } else if (audioWriteStream) {
+      audioWriteStream.write(buffer);
+    }
   });
-  // --- END NEW ---
 
   const page = await context.newPage();
 
-  // --- NEW: Close audio stream on page close ---
-  page.on("close", () => {
-    log(`[AudioRecord] Page closed, finalizing audio stream.`);
-    audioWriteStream.end();
+  page.on("close", async () => {
+    log(`[AudioRecord] Page closed, finalizing.`);
+    if (minioUploader.getMinioUploadInitialized()) {
+      await minioUploader.finalizeMinioUpload();
+    } else if (audioWriteStream) {
+      audioWriteStream.end();
+    }
   });
-  // --- END NEW ---
 
   // Log browser version
   const browserVersion = browserInstance.version();
@@ -424,7 +492,7 @@ export async function runBot(botConfig: BotConfig): Promise<void> {
         botConfig,
         page,
         performGracefulLeave,
-        new VexaBotCallbacks()
+        activeBotCallbacks,
       );
     } else if (botConfig.platform === "zoom") {
       log("Zoom platform not yet implemented.");

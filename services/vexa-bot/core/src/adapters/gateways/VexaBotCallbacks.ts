@@ -4,15 +4,18 @@ import {
 } from "../../gateways/BotCallbacks";
 import { log } from "../../utils";
 import fs from "fs/promises";
+import * as minioUploader from "../../minioUploader";
 
 export class VexaBotCallbacks implements BotCallbacks {
   transcriptionSegments: TranscriptionSegment[] = [];
+  private videoFilePath: string | null = null;
 
   onStartRecording = async (videoFilePath: string, botConnectionId: string) => {
     log(
       `[VexaBotCallbacks] onStartRecording - ${videoFilePath} - ${botConnectionId}`
     );
-    return await saveVideoAs(videoFilePath, botConnectionId);
+    this.videoFilePath = await saveVideoAs(videoFilePath, botConnectionId);
+    return;
   };
 
   onTranscriptionSegmentsReceived = (
@@ -58,6 +61,15 @@ export class VexaBotCallbacks implements BotCallbacks {
     } else {
       log("No transcription segments to write to SRT");
     }
+
+    if (this.videoFilePath && minioUploader.isMinioConfigured()) {
+      const videoKey = await minioUploader.uploadVideoFile(this.videoFilePath);
+      if (videoKey) {
+        log(`[VexaBotCallbacks] Video uploaded to MinIO: ${videoKey}`);
+      } else {
+        log("[VexaBotCallbacks] Video upload to MinIO was skipped/failed.");
+      }
+    }
   };
 }
 
@@ -96,12 +108,14 @@ async function writeSRTFile(
 }
 
 async function saveVideoAs(videoFilePath: string, botConnectionId: string) {
-  const videoDir = `/app/recordings`;
-  const newVideoPath = `/${videoDir}/video_${botConnectionId}.webm`;
+  const videoDir = "/app/recordings";
+  const recordingToken = minioUploader.getRecordingToken() || botConnectionId;
+  const newVideoPath = `${videoDir}/video_${recordingToken}.webm`;
   try {
     await fs.rename(videoFilePath, newVideoPath);
   } catch (e) {
     console.error(e);
     console.log(`"${videoFilePath}" -> "${newVideoPath}" rename failed`);
   }
+  return newVideoPath;
 }

@@ -123,6 +123,7 @@ class UserResponse(UserBase):
 
     class Config:
         orm_mode = True
+        from_attributes = True
 
 class TokenBase(BaseModel):
     user_id: int
@@ -137,6 +138,7 @@ class TokenResponse(TokenBase):
 
     class Config:
         orm_mode = True
+        from_attributes = True
 
 class UserDetailResponse(UserResponse):
     api_tokens: List[TokenResponse] = []
@@ -174,6 +176,8 @@ class MeetingCreate(BaseModel):
     bot_name: Optional[str] = Field(None, description="Optional name for the bot in the meeting")
     language: Optional[str] = Field(None, description="Optional language code for transcription (e.g., 'en', 'es')")
     task: Optional[str] = Field(None, description="Optional task for the transcription model (e.g., 'transcribe', 'translate')")
+    organization_id: Optional[str] = Field(None, description="Optional Faktions organization UUID; stored and echoed in recording-ready webhook when provided")
+    user_id: Optional[str] = Field(None, description="Optional Faktions user UUID; stored and echoed in recording-ready webhook when provided")
 
     @validator('platform')
     def platform_must_be_valid(cls, v):
@@ -201,6 +205,7 @@ class MeetingResponse(BaseModel): # Not inheriting from MeetingBase anymore to a
 
     class Config:
         orm_mode = True
+        from_attributes = True
         use_enum_values = True # Serialize Platform enum to its string value
 
 # --- Meeting Update Schema ---
@@ -230,6 +235,7 @@ class TranscriptionSegment(BaseModel):
 
     class Config:
         orm_mode = True
+        from_attributes = True
         allow_population_by_field_name = True # Allow using both alias and field name
 
 # --- WebSocket Schema (NEW - Represents data from WhisperLive) ---
@@ -269,6 +275,7 @@ class TranscriptionResponse(BaseModel): # Doesn't inherit MeetingResponse to avo
 
     class Config:
         orm_mode = True # Allows creation from ORM models (e.g., joined query result)
+        from_attributes = True
         use_enum_values = True
 
 # --- Utility Schemas --- 
