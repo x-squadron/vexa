@@ -1,3 +1,4 @@
+import os
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from shared_models.models import Meeting, MeetingSession, User
@@ -80,11 +81,16 @@ async def run(
             logger.info(f"Payload connection_id: {payload.get('connection_id')}")
             logger.info(f"Payload meeting status: {payload.get('status')}")
             
+            headers = {'Content-Type': 'application/json'}
+            webhook_secret = os.getenv('MEETING_WEBHOOK_SECRET')
+            if webhook_secret:
+                headers['X-Webhook-Secret'] = webhook_secret
+
             response = await client.post(
                 webhook_url,
                 json=payload,
                 timeout=30.0,
-                headers={'Content-Type': 'application/json'}
+                headers=headers
             )
             
             logger.info(f"Webhook response status: {response.status_code}")
