@@ -65,12 +65,28 @@ class MeetingConfigUpdate(BaseModel):
 # -------------------------------------------
 
 # --- ADDED: Pydantic Model for Bot Exit Callback ---
+class MediaArtifactPayload(BaseModel):
+    object_key: str = Field(..., description="MinIO object key for the artifact.")
+    content_type: Optional[str] = Field(None, description="Artifact MIME type.")
+    size_bytes: Optional[int] = Field(None, description="Artifact size in bytes.")
+
+
+class MediaPayload(BaseModel):
+    audio: Optional[MediaArtifactPayload] = None
+    video: Optional[MediaArtifactPayload] = None
+
+
 class BotExitCallbackPayload(BaseModel):
     connection_id: str = Field(..., description="The connectionId (session_uid) of the exiting bot.")
     exit_code: int = Field(..., description="The exit code of the bot process (0 for success, 1 for UI leave failure).")
     reason: Optional[str] = Field("self_initiated_leave", description="Reason for the exit.")
-    audio_object_key: Optional[str] = Field(None, description="MinIO object key of the uploaded recording (when bot streams audio to MinIO).")
-    video_object_key: Optional[str] = Field(None, description="MinIO object key of the uploaded video recording when available.")
+    media: Optional[MediaPayload] = Field(
+        None,
+        description="Structured media payload with audio/video artifacts.",
+    )
+    # Legacy fallback fields kept for rolling deploy safety.
+    audio_object_key: Optional[str] = Field(None, description="Legacy top-level audio key.")
+    video_object_key: Optional[str] = Field(None, description="Legacy top-level video key.")
 # --- --------------------------------------------- ---
 
 @app.on_event("startup")
@@ -677,14 +693,25 @@ async def bot_exit_callback(
             logger.warning(f"Bot exit callback: Meeting {meeting_id} status updated to 'failed' due to exit_code {exit_code}.")
         
         meeting.end_time = datetime.utcnow()
-        # Store audio_object_key in meeting.data for webhook payload when provided by bot
-        if getattr(payload, 'audio_object_key', None):
+        audio_object_key = (
+            payload.media.audio.object_key
+            if payload.media and payload.media.audio and payload.media.audio.object_key
+            else getattr(payload, 'audio_object_key', None)
+        )
+        video_object_key = (
+            payload.media.video.object_key
+            if payload.media and payload.media.video and payload.media.video.object_key
+            else getattr(payload, 'video_object_key', None)
+        )
+
+        # Store media object keys in meeting.data for webhook payload
+        if audio_object_key:
             data = dict(meeting.data) if meeting.data else {}
-            data['audio_object_key'] = payload.audio_object_key
+            data['audio_object_key'] = audio_object_key
             meeting.data = data
-        if getattr(payload, 'video_object_key', None):
+        if video_object_key:
             data = dict(meeting.data) if meeting.data else {}
-            data['video_object_key'] = payload.video_object_key
+            data['video_object_key'] = video_object_key
             meeting.data = data
         await db.commit()
         await db.refresh(meeting)

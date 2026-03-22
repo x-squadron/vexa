@@ -212,12 +212,22 @@ async function performGracefulLeave(
       exit_code: finalCallbackExitCode,
       reason: finalCallbackReason,
     };
+    const mediaObj: Record<string, unknown> = {};
     if (audioObjectKey) {
-      payloadObj.audio_object_key = audioObjectKey;
+      mediaObj.audio = {
+        object_key: audioObjectKey,
+        content_type: "audio/webm",
+      };
     }
     const videoObjectKey = minioUploader.getVideoObjectKey();
     if (videoObjectKey) {
-      payloadObj.video_object_key = videoObjectKey;
+      mediaObj.video = {
+        object_key: videoObjectKey,
+        content_type: "video/webm",
+      };
+    }
+    if (Object.keys(mediaObj).length > 0) {
+      payloadObj.media = mediaObj;
     }
     const payload = JSON.stringify(payloadObj);
 

@@ -1,4 +1,6 @@
 import os
+from typing import Any, Optional
+
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from shared_models.models import Meeting, MeetingSession, User
@@ -6,6 +8,69 @@ from sqlalchemy import select
 from pprint import pformat
 from dependency_injector.wiring import inject, Provide
 from app.core.protocols.logger_protocol import LoggerProtocol
+
+DATA_KEYS_DUPLICATED_AT_TOP_LEVEL_OR_MEDIA = {
+    "organization_id",
+    "user_id",
+    "audio_object_key",
+    "video_object_key",
+    "audio_content_type",
+    "video_content_type",
+    "audio_size_bytes",
+    "video_size_bytes",
+}
+
+
+def _normalize_size_bytes(raw: Any) -> Optional[int]:
+    """Coerce stored size (str/int) to int for structured media payloads."""
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_media_from_meeting_data(data: dict) -> dict:
+    """
+    Structured media artifacts for backend webhooks (replaces top-level audio_object_key / video_object_key).
+    Keys still originate from meeting.data as written by bot exit callback or local fallback.
+    """
+    if not data:
+        return {}
+    media: dict = {}
+    audio_key = data.get("audio_object_key")
+    if audio_key:
+        media["audio"] = {
+            "object_key": audio_key,
+            "content_type": data.get("audio_content_type") or data.get("content_type"),
+            "size_bytes": _normalize_size_bytes(
+                data.get("audio_size_bytes") or data.get("size_bytes")
+            ),
+        }
+    video_key = data.get("video_object_key")
+    if video_key:
+        media["video"] = {
+            "object_key": video_key,
+            "content_type": data.get("video_content_type") or data.get("content_type"),
+            "size_bytes": _normalize_size_bytes(
+                data.get("video_size_bytes") or data.get("size_bytes")
+            ),
+        }
+    return media
+
+
+def _sanitize_payload_data(data: dict) -> dict:
+    """
+    Remove keys duplicated elsewhere in webhook payload (top-level/media).
+    """
+    if not data:
+        return {}
+    sanitized = dict(data)
+    for key in DATA_KEYS_DUPLICATED_AT_TOP_LEVEL_OR_MEDIA:
+        sanitized.pop(key, None)
+    return sanitized
+
 
 @inject
 async def run(
@@ -47,8 +112,10 @@ async def run(
         connection_id = session_result.scalars().first() 
 
         data = meeting.data or {}
+        sanitized_data = _sanitize_payload_data(data)
+        media = _build_media_from_meeting_data(data)
 
-        # Prepare the webhook payload (plan: audio_object_key when MinIO used; organization_id/user_id echoed when stored at send bot)
+        # Prepare the webhook payload: structured media.* (no top-level audio_object_key / video_object_key).
         payload = {
             'id': meeting.id,
             'user_id': data.get('user_id') if data.get('user_id') is not None else meeting.user_id,
@@ -60,15 +127,14 @@ async def run(
             'connection_id': connection_id if connection_id else None,
             'start_time': meeting.start_time.isoformat() if meeting.start_time else None,
             'end_time': meeting.end_time.isoformat() if meeting.end_time else None,
-            'data': data,
+            'data': sanitized_data,
             'created_at': meeting.created_at.isoformat() if meeting.created_at else None,
-            'participants': data.get('participants', []),
+            'updated_at': meeting.updated_at.isoformat() if getattr(meeting, "updated_at", None) else None,
+            'participants': sanitized_data.get('participants', []),
         }
         payload['user_id_vexa'] = meeting.user_id
-        if data.get('audio_object_key') is not None:
-            payload['audio_object_key'] = data['audio_object_key']
-        if data.get('video_object_key') is not None:
-            payload['video_object_key'] = data['video_object_key']
+        if media:
+            payload['media'] = media
         if data.get('organization_id') is not None:
             payload['organization_id'] = data['organization_id']
         if data.get('user_id') is not None:

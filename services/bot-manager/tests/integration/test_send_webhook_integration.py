@@ -329,6 +329,59 @@ class TestSendWebhookIntegration:
     @pytest.mark.webhook
     @pytest.mark.integration
     @pytest.mark.http
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_webhook_includes_structured_media_from_meeting_data(self, db_session, test_user, test_meeting_session):
+        """User webhook emits media.* (not top-level audio_object_key / video_object_key)."""
+        meeting = Meeting(
+            user_id=test_user.id,
+            user=test_user,
+            platform="google_meet",
+            platform_specific_id="media-test-meeting",
+            status="completed",
+            bot_container_id="container-media",
+            start_time=datetime.now().replace(tzinfo=None),
+            end_time=datetime.now().replace(tzinfo=None),
+            data={
+                "audio_object_key": "org/1/meeting/audio.webm",
+                "video_object_key": "org/1/meeting/video.webm",
+                "audio_content_type": "audio/webm",
+                "video_content_type": "video/webm",
+                "audio_size_bytes": "100",
+                "video_size_bytes": "200",
+                "participants": ["Alice", "Bob"],
+            },
+        )
+        db_session.add(meeting)
+        await db_session.commit()
+        await db_session.refresh(meeting)
+
+        db_session.add(
+            MeetingSession(
+                meeting_id=meeting.id,
+                session_uid="session-media-1",
+                session_start_time=datetime.now().replace(tzinfo=None),
+            )
+        )
+        await db_session.commit()
+
+        webhook_request = respx.post("https://webhook.example.com/meetings").mock(
+            return_value=httpx.Response(200, json={"status": "received"})
+        )
+
+        await send_webhook_task(meeting, db_session)
+
+        assert webhook_request.called
+        payload = json.loads(webhook_request.calls[0].request.content.decode())
+        assert "media" in payload
+        assert payload["media"]["audio"]["object_key"] == "org/1/meeting/audio.webm"
+        assert payload["media"]["video"]["object_key"] == "org/1/meeting/video.webm"
+        assert "audio_object_key" not in payload
+        assert "video_object_key" not in payload
+
+    @pytest.mark.webhook
+    @pytest.mark.integration
+    @pytest.mark.http
     @pytest.mark.database
     @respx.mock
     @pytest.mark.asyncio
