@@ -287,15 +287,8 @@ async def start_bot_container(
         f"WHISPER_LIVE_URL={whisper_live_url_for_bot}", # Use the URL from bot-manager's env
         f"LOG_LEVEL={os.getenv('LOG_LEVEL', 'INFO').upper()}",
     ]
-    # Binds: recordings volume + optional host path for participant debug log
+    # Binds: recordings volume (if configured)
     binds = [f"{RECORDING_BIND_SOURCE}:{RECORDING_VOLUME_PATH}"] if (RECORDING_BIND_SOURCE and RECORDING_VOLUME_PATH) else []
-    participant_debug_host = os.getenv("PARTICIPANT_DEBUG_LOG_HOST_PATH")
-    if participant_debug_host:
-        container_debug_path = "/app/vexa_debug_out"
-        environment.append(f"PARTICIPANT_DEBUG_LOG_PATH={container_debug_path}/participant_debug_logs.txt")
-        binds.append(f"{participant_debug_host}:{container_debug_path}")
-    elif RECORDING_VOLUME_PATH:
-        environment.append(f"PARTICIPANT_DEBUG_LOG_PATH={RECORDING_VOLUME_PATH.rstrip('/')}/participant_debug_logs.txt")
     for env_name in ("APP_MINIO_ENDPOINT", "APP_MINIO_BUCKET", "APP_MINIO_ACCESS_KEY", "APP_MINIO_SECRET_KEY"):
         env_val = os.getenv(env_name)
         if env_val:
