@@ -34,6 +34,10 @@ from app.tasks.bot_exit_tasks import run_all_tasks
 from shared_models.models import Base, User, Meeting, MeetingSession
 from shared_models.database import async_session_local
 
+# Faktions tenant + user UUIDs (echoed in meeting.data when a bot is requested via Faktions POST /bots)
+FAKTIONS_ORG_ID = "11111111-1111-4111-8111-111111111111"
+FAKTIONS_USER_ID = "22222222-2222-4222-8222-222222222222"
+
 @pytest.mark.describe('Webhook integration')
 class TestSendWebhookIntegration:
     """
@@ -117,6 +121,10 @@ class TestSendWebhookIntegration:
             start_time=datetime.now().replace(tzinfo=None),
             end_time=datetime.now().replace(tzinfo=None),
             data={
+                "organization_id": FAKTIONS_ORG_ID,
+                "user_id": FAKTIONS_USER_ID,
+                "audio_object_key": "test/audio.webm",
+                "audio_content_type": "audio/webm",
                 "participants": [
                     {"name": "John Doe", "email": "john@example.com"},
                     {"name": "Jane Smith", "email": "jane@example.com"}
@@ -168,7 +176,9 @@ class TestSendWebhookIntegration:
         print(payload)
         
         assert payload["id"] == test_meeting.id
-        assert payload["user_id"] == test_meeting.user_id
+        assert payload["organization_id"] == FAKTIONS_ORG_ID
+        assert payload["user_id"] == FAKTIONS_USER_ID
+        assert payload["media"]["audio"]["object_key"] == "test/audio.webm"
         assert payload["platform"] == "google_meet"
         assert payload["native_meeting_id"] == "test-meeting-123"
         assert payload["status"] == "completed"
@@ -181,7 +191,6 @@ class TestSendWebhookIntegration:
         assert "start_time" in payload
         assert "end_time" in payload
         assert "created_at" in payload
-        assert "updated_at" in payload
 
     @pytest.mark.webhook
     @pytest.mark.error_handling
@@ -343,6 +352,8 @@ class TestSendWebhookIntegration:
             start_time=datetime.now().replace(tzinfo=None),
             end_time=datetime.now().replace(tzinfo=None),
             data={
+                "organization_id": FAKTIONS_ORG_ID,
+                "user_id": FAKTIONS_USER_ID,
                 "audio_object_key": "org/1/meeting/audio.webm",
                 "video_object_key": "org/1/meeting/video.webm",
                 "audio_content_type": "audio/webm",
@@ -395,19 +406,32 @@ class TestSendWebhookIntegration:
         
         payload = json.loads(webhook_request.calls[0].request.content.decode())
         
-        # Verify payload structure and types
+        # Verify payload structure and types (Faktions recording-complete contract)
         required_fields = [
-            'id', 'user_id', 'user_id_vexa', 'platform', 'native_meeting_id', 'constructed_meeting_url',
-            'status', 'bot_container_id', 'connection_id', 'start_time', 'end_time',
-            'data', 'created_at', 'participants'
+            'id',
+            'organization_id',
+            'user_id',
+            'media',
+            'user_id_vexa',
+            'platform',
+            'native_meeting_id',
+            'constructed_meeting_url',
+            'status',
+            'bot_container_id',
+            'connection_id',
+            'start_time',
+            'end_time',
+            'data',
+            'created_at',
+            'participants',
         ]
-        
+
         for field in required_fields:
             assert field in payload, f"Required field '{field}' missing from webhook payload"
-        
-        # Verify specific types and values (user_id may be int (Vexa) or str (Faktions UUID when stored))
+
         assert isinstance(payload['id'], int)
-        assert payload['user_id'] is not None
+        assert payload['user_id'] == FAKTIONS_USER_ID
+        assert isinstance(payload['user_id'], str)
         assert isinstance(payload['user_id_vexa'], int)
         assert isinstance(payload['platform'], str)
         assert isinstance(payload['participants'], list)
@@ -456,6 +480,9 @@ class TestSendWebhookIntegration:
             start_time=datetime.now().replace(tzinfo=None),
             end_time=datetime.now().replace(tzinfo=None),
             data={
+                "organization_id": FAKTIONS_ORG_ID,
+                "user_id": FAKTIONS_USER_ID,
+                "audio_object_key": "test/missing-participants.webm",
                 "other_field": "some_value",
                 "meeting_info": "test data"
                 # NOTE: No 'participants' key here - should default to empty array
