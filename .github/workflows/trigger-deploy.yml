@@ -17,7 +17,7 @@ jobs:
       - name: Run unit tests
         run: |
           cd services/bot-manager
-          pip install -r requirements.txt
+          pip install -r requirements.txt -r requirements-test.txt
           python -m pytest tests/ -v --ignore=tests/e2e --ignore=tests/integration
 
   deploy:
