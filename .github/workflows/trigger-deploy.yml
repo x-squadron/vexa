@@ -25,16 +25,16 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger and wait for deploy
+      - name: Trigger platform deploy
+        id: trigger
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           SERVICE=vexa
           PLATFORM=x-squadron/faktions-platform
 
+          echo "::group::Triggering deploy for $SERVICE"
           gh workflow run deploy.yml -R "$PLATFORM" -f service="$SERVICE"
-          echo "Triggered deploy for $SERVICE"
-
           sleep 10
 
           RUN_ID=$(gh run list -R "$PLATFORM" -w deploy.yml \
@@ -46,5 +46,49 @@ jobs:
             exit 1
           fi
 
-          echo "Deploy run: https://github.com/$PLATFORM/actions/runs/$RUN_ID"
-          gh run watch "$RUN_ID" -R "$PLATFORM" --exit-status
+          RUN_URL="https://github.com/$PLATFORM/actions/runs/$RUN_ID"
+          echo "run-id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "run-url=$RUN_URL" >> "$GITHUB_OUTPUT"
+          echo "Deploy run: $RUN_URL"
+          echo "::endgroup::"
+
+      - name: Wait for deploy
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          PLATFORM=x-squadron/faktions-platform
+          RUN_ID="${{ steps.trigger.outputs.run-id }}"
+          RUN_URL="${{ steps.trigger.outputs.run-url }}"
+
+          echo "Waiting for deploy to complete..."
+          echo "Follow live: $RUN_URL"
+          gh run watch "$RUN_ID" -R "$PLATFORM" --exit-status 2>&1 | tail -20
+
+      - name: Summary
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          PLATFORM=x-squadron/faktions-platform
+          RUN_ID="${{ steps.trigger.outputs.run-id }}"
+          RUN_URL="${{ steps.trigger.outputs.run-url }}"
+
+          CONCLUSION=$(gh run view "$RUN_ID" -R "$PLATFORM" --json conclusion --jq '.conclusion' 2>/dev/null || echo "unknown")
+
+          if [ "$CONCLUSION" = "success" ]; then
+            ICON="✅"
+          else
+            ICON="❌"
+          fi
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## $ICON Deploy vexa
+
+          | | |
+          |---|---|
+          | **Service** | vexa |
+          | **Result** | $CONCLUSION |
+          | **Deploy run** | [View]($RUN_URL) |
+          | **Commit** | \`${GITHUB_SHA::7}\` |
+          EOF
+          sed -i 's/^          //' "$GITHUB_STEP_SUMMARY"
