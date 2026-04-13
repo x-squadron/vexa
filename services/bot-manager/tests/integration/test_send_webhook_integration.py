@@ -115,7 +115,7 @@ class TestSendWebhookIntegration:
             user_id=test_user.id,
             user=test_user,  # Eager load user to simulate bot exit task behavior
             platform="google_meet",
-            platform_specific_id="test-meeting-123",
+            platform_specific_id="abc-defg-hij",
             status="completed",
             bot_container_id="container-abc123",
             start_time=datetime.now().replace(tzinfo=None),
@@ -180,7 +180,7 @@ class TestSendWebhookIntegration:
         assert payload["user_id"] == FAKTIONS_USER_ID
         assert payload["media"]["audio"]["object_key"] == "test/audio.webm"
         assert payload["platform"] == "google_meet"
-        assert payload["native_meeting_id"] == "test-meeting-123"
+        assert payload["native_meeting_id"] == "abc-defg-hij"
         assert payload["status"] == "completed"
         assert payload["bot_container_id"] == "container-abc123"
         assert payload["connection_id"] == "session-uid-123"
