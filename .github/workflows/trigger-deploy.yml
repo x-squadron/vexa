@@ -1,0 +1,34 @@
+# Copy to vexa/.github/workflows/trigger-deploy.yml
+name: Trigger Deploy
+
+on:
+  push:
+    branches: [develop]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger and wait for deploy
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          SERVICE=vexa
+          PLATFORM=x-squadron/faktions-platform
+
+          gh workflow run deploy.yml -R "$PLATFORM" -f service="$SERVICE"
+          echo "Triggered deploy for $SERVICE"
+
+          sleep 10
+
+          RUN_ID=$(gh run list -R "$PLATFORM" -w deploy.yml \
+            --event workflow_dispatch -L 1 \
+            --json databaseId --jq '.[0].databaseId')
+
+          if [ -z "$RUN_ID" ]; then
+            echo "::error::Could not find deploy run"
+            exit 1
+          fi
+
+          echo "Deploy run: https://github.com/$PLATFORM/actions/runs/$RUN_ID"
+          gh run watch "$RUN_ID" -R "$PLATFORM" --exit-status
