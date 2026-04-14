@@ -33,6 +33,7 @@ DOCKER_HOST = os.environ.get("DOCKER_HOST", "unix://var/run/docker.sock")
 DOCKER_NETWORK = os.environ.get("DOCKER_NETWORK", "vexa_default")
 BOT_IMAGE_NAME = os.environ.get("BOT_IMAGE_NAME", "vexa-bot:dev")
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
+BOT_MANAGER_BASE_URL = os.environ.get("BOT_MANAGER_BASE_URL", "http://bot-manager:8080")
 RECORDING_VOLUME_PATH = os.environ.get("RECORDING_VOLUME_PATH")
 RECORDING_BIND_SOURCE = os.environ.get("RECORDING_BIND_SOURCE")
 
@@ -258,7 +259,7 @@ async def start_bot_container(
             "noOneJoinedTimeout": 120000,
             "everyoneLeftTimeout": 60000
         },
-        "botManagerCallbackUrl": f"http://bot-manager:8080/bots/internal/callback/exited"
+        "botManagerCallbackUrl": f"{BOT_MANAGER_BASE_URL}/bots/internal/callback/exited"
     }
     if organization_id is not None:
         bot_config_data["organization_id"] = organization_id
