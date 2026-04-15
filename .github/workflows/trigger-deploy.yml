@@ -34,7 +34,11 @@ jobs:
           PLATFORM=x-squadron/faktions-platform
 
           echo "::group::Triggering deploy for $SERVICE"
-          gh workflow run deploy.yml -R "$PLATFORM" -f service="$SERVICE"
+          gh workflow run deploy.yml -R "$PLATFORM" \
+            -f service="$SERVICE" \
+            -f source_repo="$GITHUB_REPOSITORY" \
+            -f source_sha="$GITHUB_SHA" \
+            -f triggered_by="$GITHUB_ACTOR"
           sleep 10
 
           RUN_ID=$(gh run list -R "$PLATFORM" -w deploy.yml \
