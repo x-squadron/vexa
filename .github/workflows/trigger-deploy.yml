@@ -38,7 +38,8 @@ jobs:
             -f service="$SERVICE" \
             -f source_repo="$GITHUB_REPOSITORY" \
             -f source_sha="$GITHUB_SHA" \
-            -f triggered_by="$GITHUB_ACTOR"
+            -f triggered_by="$GITHUB_ACTOR" \
+            -f commit_msg="$(git log -1 --format=%s)"
           sleep 10
 
           RUN_ID=$(gh run list -R "$PLATFORM" -w deploy.yml \
