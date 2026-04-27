@@ -39,6 +39,7 @@ jobs:
           # take >10s to surface a freshly-dispatched run across repos).
           TRIGGER_OUT=$(gh workflow run deploy.yml -R "$PLATFORM" \
             -f service="$SERVICE" \
+            -f environment="develop" \
             -f source_repo="$GITHUB_REPOSITORY" \
             -f source_sha="$GITHUB_SHA" \
             -f triggered_by="$GITHUB_ACTOR" \
