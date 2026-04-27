@@ -69,6 +69,7 @@ jobs:
 
           echo "Waiting for deploy to complete..."
           echo "Follow live: $RUN_URL"
+          set -o pipefail   # without this the pipe to tail swallows gh's exit code
           gh run watch "$RUN_ID" -R "$PLATFORM" --exit-status 2>&1 | tail -20
 
       - name: Summary
