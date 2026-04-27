@@ -34,24 +34,25 @@ jobs:
           PLATFORM=x-squadron/faktions-platform
 
           echo "::group::Triggering deploy for $SERVICE"
-          gh workflow run deploy.yml -R "$PLATFORM" \
+          # gh workflow run prints the new run's URL to stdout; capture it so
+          # we don't have to race against `gh run list` indexing (which can
+          # take >10s to surface a freshly-dispatched run across repos).
+          TRIGGER_OUT=$(gh workflow run deploy.yml -R "$PLATFORM" \
             -f service="$SERVICE" \
             -f source_repo="$GITHUB_REPOSITORY" \
             -f source_sha="$GITHUB_SHA" \
             -f triggered_by="$GITHUB_ACTOR" \
-            -f commit_msg="${{ github.event.head_commit.message }}"
-          sleep 10
+            -f commit_msg="${{ github.event.head_commit.message }}" 2>&1)
+          echo "$TRIGGER_OUT"
 
-          RUN_ID=$(gh run list -R "$PLATFORM" -w deploy.yml \
-            --event workflow_dispatch -L 1 \
-            --json databaseId --jq '.[0].databaseId')
+          RUN_URL=$(echo "$TRIGGER_OUT" | grep -oE "https://github.com/$PLATFORM/actions/runs/[0-9]+" | head -1)
+          RUN_ID=$(echo "$RUN_URL" | grep -oE '[0-9]+$')
 
           if [ -z "$RUN_ID" ]; then
-            echo "::error::Could not find deploy run"
+            echo "::error::Could not parse deploy run URL from gh workflow run output"
             exit 1
           fi
 
-          RUN_URL="https://github.com/$PLATFORM/actions/runs/$RUN_ID"
           echo "run-id=$RUN_ID" >> "$GITHUB_OUTPUT"
           echo "run-url=$RUN_URL" >> "$GITHUB_OUTPUT"
           echo "Deploy run: $RUN_URL"
