@@ -25,78 +25,8 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger platform deploy
-        id: trigger
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          SERVICE=vexa
-          PLATFORM=x-squadron/faktions-platform
-
-          echo "::group::Triggering deploy for $SERVICE"
-          # gh workflow run prints the new run's URL to stdout; capture it so
-          # we don't have to race against `gh run list` indexing (which can
-          # take >10s to surface a freshly-dispatched run across repos).
-          TRIGGER_OUT=$(gh workflow run deploy.yml -R "$PLATFORM" \
-            -f service="$SERVICE" \
-            -f environment="develop" \
-            -f source_repo="$GITHUB_REPOSITORY" \
-            -f source_sha="$GITHUB_SHA" \
-            -f triggered_by="$GITHUB_ACTOR" \
-            -f commit_msg="${{ github.event.head_commit.message }}" 2>&1)
-          echo "$TRIGGER_OUT"
-
-          RUN_URL=$(echo "$TRIGGER_OUT" | grep -oE "https://github.com/$PLATFORM/actions/runs/[0-9]+" | head -1)
-          RUN_ID=$(echo "$RUN_URL" | grep -oE '[0-9]+$')
-
-          if [ -z "$RUN_ID" ]; then
-            echo "::error::Could not parse deploy run URL from gh workflow run output"
-            exit 1
-          fi
-
-          echo "run-id=$RUN_ID" >> "$GITHUB_OUTPUT"
-          echo "run-url=$RUN_URL" >> "$GITHUB_OUTPUT"
-          echo "Deploy run: $RUN_URL"
-          echo "::endgroup::"
-
-      - name: Wait for deploy
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          PLATFORM=x-squadron/faktions-platform
-          RUN_ID="${{ steps.trigger.outputs.run-id }}"
-          RUN_URL="${{ steps.trigger.outputs.run-url }}"
-
-          echo "Waiting for deploy to complete..."
-          echo "Follow live: $RUN_URL"
-          set -o pipefail   # without this the pipe to tail swallows gh's exit code
-          gh run watch "$RUN_ID" -R "$PLATFORM" --exit-status 2>&1 | tail -20
-
-      - name: Summary
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          PLATFORM=x-squadron/faktions-platform
-          RUN_ID="${{ steps.trigger.outputs.run-id }}"
-          RUN_URL="${{ steps.trigger.outputs.run-url }}"
-
-          CONCLUSION=$(gh run view "$RUN_ID" -R "$PLATFORM" --json conclusion --jq '.conclusion' 2>/dev/null || echo "unknown")
-
-          if [ "$CONCLUSION" = "success" ]; then
-            ICON="✅"
-          else
-            ICON="❌"
-          fi
-
-          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
-          ## $ICON Deploy vexa
-
-          | | |
-          |---|---|
-          | **Service** | vexa |
-          | **Result** | $CONCLUSION |
-          | **Deploy run** | [View]($RUN_URL) |
-          | **Commit** | \`${GITHUB_SHA::7}\` |
-          EOF
-          sed -i 's/^          //' "$GITHUB_STEP_SUMMARY"
+      - uses: x-squadron/faktions-platform/.github/actions/trigger-deploy@main
+        with:
+          service-name: vexa
+          environment: develop
+          github-token: ${{ secrets.GH_PAT }}
